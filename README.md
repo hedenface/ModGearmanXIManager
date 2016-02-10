@@ -6,7 +6,7 @@ This is a component used to manage a variety of ModGearman Servers/Workers, poss
 ModGearman XI Manager is a fork of an earlier work, ModGearman Manager (https://exchange.nagios.org/directory/Addons/Components/ModGearman-Manager/details).
 
 ## How to Use
-1. Download the ZIP file
+1. Download the ZIP file (http://heden.consulting/nagios/modgearmanxi.zip)
 2. Upload it to your Nagios XI instance (Admin -> Manage Components -> Upload)
 3. Run the included setup.sh file, which sets up necessary permissions on the workers
 4. Update the $gearmanxi_cfg array in modgearmanxi.php to reflect your environment
