@@ -65,7 +65,10 @@ $gearmanxi_cfg = array(
 		),
 
 	// where can apache safely store the remote configuration files?
-	'apache_safe_dir' => '/tmp/nagiostemp/mod_gearman'
+	'apache_safe_dir' => '/tmp/nagiostemp/mod_gearman',
+
+	// which version of ModGearman is the server running?
+	'mod_gearman_version' => 2,
 	);
 
 // route request - useful for later additions maybe?
@@ -263,7 +266,7 @@ HTML;
 
 		} else {
 			$conf_file_data = @file_get_contents("$gearman_apache_safe_dir/$worker_name.conf");
-			$gearman_worker_html .= <<<HTML 
+			$gearman_worker_html .= <<<HTML
 				<div class="conf worker">
 					<input type="hidden" name="active_$worker_name" value="true" />
 					<div class="name">$worker_name</div>
@@ -335,7 +338,7 @@ textarea.conftext {
 	</style>
 	<script type="text/javascript">
 		window.setInterval(function() {
-			$.ajax("modgearmanxi.ajax.php").done(function(html) {
+			$.ajax("modgearmanxi.ajax.php?ver=<?php echo $gearmanxi_cfg["mod_gearman_version"]; ?>").done(function(html) {
 				$("#gearman_top").empty().append(html);
 			});
 		}, 1000);
