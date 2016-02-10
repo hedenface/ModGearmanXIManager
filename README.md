@@ -1,5 +1,5 @@
 # ModGearmanXIManager
-Nagios XI Component for managing ModGearman installation
+Nagios XI Component for managing ModGearman installations
 
 ## Overview
 This is a component used to manage a variety of ModGearman Servers/Workers, possibly running different versions of ModGearman, from a central location - within the Nagios XI interface. 
