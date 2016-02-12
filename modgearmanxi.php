@@ -71,216 +71,194 @@ $gearmanxi_cfg = array(
 	'mod_gearman_version' => 2,
 	);
 
-// route request - useful for later additions maybe?
-route_request();
-function route_request() {
+// readability's sake!
+$apache_safe_dir = $gearmanxi_cfg["apache_safe_dir"];
+	
+// attempt to create gearman_apache_safe_dir
+if (!mkdir($apache_safe_dir, 0777, true))
+	$error_msg .= "Unable to create directory: $apache_safe_dir<br />";
 
-	global $request;
+// attempt to delete all current configuration files (the backups on this server, not on each of the hosts)
+foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker)
+	if (!unlink("$apache_safe_dir/$worker_name.conf"))
+		$error_msg .= "Unable to delete tempfile: $apache_safe_dir/$worker_name.conf<br />";
 
-	show_page();
-	exit;
+// handle post data
+$update = grab_request_var("update", "");
+$restart = grab_request_var("restart", "");
+$restart_active = grab_request_var("restart_active", "");
+$disconnect_worker = false;
+$connect_worker = false;
+
+// cycle through the workers and check for any connects/disconnects
+foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker) {
+	
+	// we have to replace the dots with underscores because of post (this comes up later, too)
+	$safe_worker_name = str_replace(".", "_", $worker_name);
+
+	$disconnect = grab_request_var("disconnect_$safe_worker_name", "");
+	$connect = grab_request_var("connect_$safe_worker_name", "");
+
+	if ($disconnect != "")
+		control_server($worker_name, "stop");
+
+	if ($connect != "")
+		control_server($worker_name, "sart");
 }
 
-// this function returns the actual page
-function show_page($error = false, $msg = "") {
-
-	global $request;
-	global $gearmanxi_cfg;
-	$apache_safe_dir = $gearmanxi_cfg["apache_safe_dir"];
-		
-	// attempt to create gearman_apache_safe_dir
-	if (!mkdir($apache_safe_dir, 0777, true))
-		$error_msg .= "Unable to create directory: $apache_safe_dir<br />";
+// update worker configuration files
+if ($update != "") {
 	
-	// attempt to delete all current configuration files (the backups on this server, not on each of the hosts)
-	foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker)
-		if (!unlink("$apache_safe_dir/$worker_name.conf"))
-			$error_msg .= "Unable to delete tempfile: $apache_safe_dir/$worker_name.conf<br />";
-	
-	// handle post data
-	$update = grab_request_var("update", "");
-	$restart = grab_request_var("restart", "");
-	$restart_active = grab_request_var("restart_active", "");
-	$disconnect_worker = false;
-	$connect_worker = false;
-
-	// cycle through the workers and check for any connects/disconnects
-	foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker) {
-		
-		// we have to replace the dots with underscores because of post (this comes up later, too)
-		$safe_worker_name = str_replace(".", "_", $worker_name);
-
-		$disconnect = grab_request_var("disconnect_$safe_worker_name", "");
-		$connect = grab_request_var("connect_$safe_worker_name", "");
-
-		if ($disconnect != "")
-			$disconnect_worker = $worker_name;
-
-		if ($connect != "")
-			$connect_worker = $worker_name;
-	}
-	
-	// update worker configuration files
-	if ($update != "") {
-		
-		// cycle through each worker to check for configuration
-		foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker) {
-
-			// for readability
-			$worker_ip = $worker["ip"];
-			$worker_cfg = $worker["cfg"];
-			
-			// replace dots with underscores
-			$safe_worker_name = str_replace(".", "_", $worker_name);
-			$conf_file = grab_request_var("conf_$safe_worker_name", "");
-
-
-			if ($conf_file != "") {
-				
-				// replace the \r (dos format) with blank (nix)
-				$conf_file = str_replace("\r", "", $conf_file);
-				
-				// write the conf file, and check for errors in the meantime
-				// but we don't check for errors IF the file is written successfully, because since we've got this far, we can (not safely)
-				// assume that the configuration file textarea was present to begin with, which means that the original ssh command was executed.
-				if (@file_put_contents("$apache_safe_dir/$worker_name.conf.new", $conf_file) !== false) {
-					
-					// backup the worker's current configuration file
-					// note that we don't use ssh2_* commands here
-					$ssh_cmd = "ssh nagios@$worker_ip \"cp $worker_cfg $worker_cfg.backup_`date +%F_%H%m`\"";
-					exec($ssh_cmd);
-					
-					// copy the new file to the server
-					$ssh_cmd = "scp $apache_safe_dir/$worker_name.conf.new nagios@$worker_ip:$worker_cfg";
-					exec($ssh_cmd);
-					
-					// delete our .conf.new file!
-					if (!unlink("$gearman_apache_safe_dir/$worker_name.conf.new"))
-						$error_msg .= "Unable to delete tempfile: $apache_safe_dir/$worker_name.conf.new<br />";
-						
-				} else
-					$error_msg .= "Unable to create tempfile: $apache_safe_dir/$worker_name.conf.new<br />";
-			}
-		}
-		
-		// we want to restart all of the workers we just made a change to
-		$restart_active = "Restart ACTIVE Workers";
-	}
-
-	// restart ALL client workers
-	// THIS IS POTENTIALLY STUPID AND DANGEROUS BUT WHATEVER
-	if ($restart != "") {
-
-		// cycle through each worker to restart!
-		foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker)
-			control_server($worker_name, "restart");
-	}
-	
-	// restart only active client workers
-	if ($restart_active != "") {
-		
-		// cycle through each worker to restart!
-		foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker) {
-		
-			// replace dots with underscores, and check if we have an active_$worker_name
-			// only proceed if we do!
-			$safe_worker_name = str_replace(".", "_", $worker_name);
-			$active = grab_request_var("active_$safe_worker_name", "");
-			if ($active != "")
-				control_server($worker_name, "restart");
-		}
-	}
-	
-	// disconnect a worker
-	if ($disconnect_worker !== false)
-		control_server($disconnect_worker, "stop");
-	
-	// connect a worker
-	if ($connect_worker !== false)
-		control_server($connect_worker, "start");
-	
-	// get worker information
-	$gearman_worker_html = "";
-	$ssh_output = array();
+	// cycle through each worker to check for configuration
 	foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker) {
 
 		// for readability
 		$worker_ip = $worker["ip"];
 		$worker_cfg = $worker["cfg"];
-		$worker_initd = $worker["initd"];
-	
-		// the scp(ssh) command to pull this gearmans conf over
-		$ssh_cmd = "scp nagios@$worker_ip:$worker_cfg $apache_safe_dir/$worker_name.conf 2>&1";
-			
-		// execute the ssh command and get each line that we checked for in its own array
-		$ssh_output[$worker_name] = array();
-		exec($ssh_cmd, $ssh_output[$worker_name]);
-				
-		// check if we have any error output from the ssh command
-		if (preg_match("/^ssh:/", $ssh_output[$worker_name])) {
-
-			// this is unexpected maintenance, can we handle the errors gracefully?
-			$ssh_output[$worker_name][] = "UNEXPECTED_ERROR";
-		}
 		
-		// execute a check_gearman command to check and see if this worker is disconnected!
-		// this only works if the $worker_name variable is the fqdn name that gearmand expects
-		// AND it only works if our gearman server is running on localhost
-		// good output starts with: "check_gearman OK -"
-		// bad output starts with: "check_gearman WARNING -" - THIS IS THE ONE WE'RE WORRIED ABOUT RUH-ROH RAGGY
-		$check_array = array();
-		$check_cmd = "ssh nagios@$worker_ip \"$worker_initd status\"";
-		exec($check_cmd, $check_array);
-		foreach ($check_array as $check_array_line) {
-			if (strpos($check_array_line, "mod_gearman_worker is not running") !== false || strpos($check_array_line, "mod_gearman2_worker is not running") !== false) {
-				$ssh_output[$worker_name][] = "DISCONNECTED";
-			}
-		}
-                
-		// build our gearman_worker_html that contains the information for each worker
-		if (in_array("UNEXPECTED_ERROR", $ssh_output[$worker_name])) {
-			$gearman_worker_html .= <<<HTML
-				<div class="error worker">
-					<div class="name">{$worker_name}</div>
-					<div class="ip">{$worker_ip}</div>
-					<div class="message">Unable to open SSH connection</div>
-					<div class="clear"></div>
-				</div>
-				<div class="clear"></div>
-HTML;
+		// replace dots with underscores
+		$safe_worker_name = str_replace(".", "_", $worker_name);
+		$conf_file = grab_request_var("conf_$safe_worker_name", "");
 
-		} elseif (in_array("DISCONNECTED", $ssh_output[$worker_name])) {
-			$conf_file_data = @file_get_contents("$gearman_apache_safe_dir/$worker_name.conf");
-			$gearman_worker_html .= <<<HTML
-				<div class="disconnected worker">
-					<div class="name">{$worker_name} NOT CONNECTED</div>
-					<div class="ip">{$worker_ip}</div>
-					<input type="submit" name="connect_$worker_ip" value="Connect this Worker" />
-					<textarea name="conf_$worker_name" id="conf_$worker_name" class="conftext">
-						{$conf_file_data}
-					</textarea>
-					<div class="clear"></div>
-				</div>
-				<div class="clear"></div>
-HTML;
 
-		} else {
-			$conf_file_data = @file_get_contents("$gearman_apache_safe_dir/$worker_name.conf");
-			$gearman_worker_html .= <<<HTML
-				<div class="conf worker">
-					<input type="hidden" name="active_$worker_name" value="true" />
-					<div class="name">$worker_name</div>
-					<div class="ip">$worker_ip</div>
-					<input type="submit" name="disconnect_$worker_ip" value="Disconnect this Worker" />
-					<textarea name="conf_$worker_name" id="conf_$worker_name" class="conftext">
-						{$conf_file_data}
-					</textarea>
-					<div class="clear"></div>
-				</div>
-				<div class="clear"></div>
-HTML;
+		if ($conf_file != "") {
+			
+			// replace the \r (dos format) with blank (nix)
+			$conf_file = str_replace("\r", "", $conf_file);
+			
+			// write the conf file, and check for errors in the meantime
+			// but we don't check for errors IF the file is written successfully, because since we've got this far, we can (not safely)
+			// assume that the configuration file textarea was present to begin with, which means that the original ssh command was executed.
+			if (@file_put_contents("$apache_safe_dir/$worker_name.conf.new", $conf_file) !== false) {
+				
+				// backup the worker's current configuration file
+				// note that we don't use ssh2_* commands here
+				$ssh_cmd = "ssh nagios@$worker_ip \"cp $worker_cfg $worker_cfg.backup_`date +%F_%H%m`\"";
+				exec($ssh_cmd);
+				
+				// copy the new file to the server
+				$ssh_cmd = "scp $apache_safe_dir/$worker_name.conf.new nagios@$worker_ip:$worker_cfg";
+				exec($ssh_cmd);
+				
+				// delete our .conf.new file!
+				if (!unlink("$gearman_apache_safe_dir/$worker_name.conf.new"))
+					$error_msg .= "Unable to delete tempfile: $apache_safe_dir/$worker_name.conf.new<br />";
+					
+			} else
+				$error_msg .= "Unable to create tempfile: $apache_safe_dir/$worker_name.conf.new<br />";
 		}
 	}
+	
+	// we want to restart all of the workers we just made a change to
+	$restart_active = "Restart ACTIVE Workers";
+}
+
+// restart ALL client workers
+// THIS IS POTENTIALLY STUPID AND DANGEROUS BUT WHATEVER
+if ($restart != "") {
+
+	// cycle through each worker to restart!
+	foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker)
+		control_server($worker_name, "restart");
+}
+
+// restart only active client workers
+if ($restart_active != "") {
+	
+	// cycle through each worker to restart!
+	foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker) {
+	
+		// replace dots with underscores, and check if we have an active_$worker_name
+		// only proceed if we do!
+		$safe_worker_name = str_replace(".", "_", $worker_name);
+		$active = grab_request_var("active_$safe_worker_name", "");
+		if ($active != "")
+			control_server($worker_name, "restart");
+	}
+}
+
+// get worker information
+$gearman_worker_html = "";
+$ssh_output = array();
+foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker) {
+
+	// for readability
+	$worker_ip = $worker["ip"];
+	$worker_cfg = $worker["cfg"];
+	$worker_initd = $worker["initd"];
+
+	// the scp(ssh) command to pull this gearmans conf over
+	$ssh_cmd = "scp nagios@$worker_ip:$worker_cfg $apache_safe_dir/$worker_name.conf 2>&1";
+		
+	// execute the ssh command and get each line that we checked for in its own array
+	$ssh_output[$worker_name] = array();
+	exec($ssh_cmd, $ssh_output[$worker_name]);
+			
+	// check if we have any error output from the ssh command
+	if (preg_match("/^ssh:/", $ssh_output[$worker_name])) {
+
+		// this is unexpected maintenance, can we handle the errors gracefully?
+		$ssh_output[$worker_name][] = "UNEXPECTED_ERROR";
+	}
+	
+	// execute a check_gearman command to check and see if this worker is disconnected!
+	// this only works if the $worker_name variable is the fqdn name that gearmand expects
+	// AND it only works if our gearman server is running on localhost
+	// good output starts with: "check_gearman OK -"
+	// bad output starts with: "check_gearman WARNING -" - THIS IS THE ONE WE'RE WORRIED ABOUT RUH-ROH RAGGY
+	$check_array = array();
+	$check_cmd = "ssh nagios@$worker_ip \"$worker_initd status\"";
+	exec($check_cmd, $check_array);
+	foreach ($check_array as $check_array_line) {
+		if (strpos($check_array_line, "mod_gearman_worker is not running") !== false || strpos($check_array_line, "mod_gearman2_worker is not running") !== false) {
+			$ssh_output[$worker_name][] = "DISCONNECTED";
+		}
+	}
+            
+	// build our gearman_worker_html that contains the information for each worker
+	if (in_array("UNEXPECTED_ERROR", $ssh_output[$worker_name])) {
+		$gearman_worker_html .= <<<HTML
+			<div class="error worker">
+				<div class="name">{$worker_name}</div>
+				<div class="ip">{$worker_ip}</div>
+				<div class="message">Unable to open SSH connection</div>
+				<div class="clear"></div>
+			</div>
+			<div class="clear"></div>
+HTML;
+
+	} elseif (in_array("DISCONNECTED", $ssh_output[$worker_name])) {
+		$conf_file_data = @file_get_contents("$gearman_apache_safe_dir/$worker_name.conf");
+		$gearman_worker_html .= <<<HTML
+			<div class="disconnected worker">
+				<div class="name">{$worker_name} NOT CONNECTED</div>
+				<div class="ip">{$worker_ip}</div>
+				<input type="submit" name="connect_$worker_ip" value="Connect this Worker" />
+				<textarea name="conf_$worker_name" id="conf_$worker_name" class="conftext">
+					{$conf_file_data}
+				</textarea>
+				<div class="clear"></div>
+			</div>
+			<div class="clear"></div>
+HTML;
+
+	} else {
+		$conf_file_data = @file_get_contents("$gearman_apache_safe_dir/$worker_name.conf");
+		$gearman_worker_html .= <<<HTML
+			<div class="conf worker">
+				<input type="hidden" name="active_$worker_name" value="true" />
+				<div class="name">$worker_name</div>
+				<div class="ip">$worker_ip</div>
+				<input type="submit" name="disconnect_$worker_ip" value="Disconnect this Worker" />
+				<textarea name="conf_$worker_name" id="conf_$worker_name" class="conftext">
+					{$conf_file_data}
+				</textarea>
+				<div class="clear"></div>
+			</div>
+			<div class="clear"></div>
+HTML;
+	}
+}
 	
 
 ?>
@@ -354,17 +332,15 @@ textarea.conftext {
 			<input type="submit" name="restart" value="Restart ALL Workers" />
 			<input type="submit" name="restart_active" value="Restart ACTIVE Workers" />
 			<div class="clear"></div>
-<?php
-		// show worker status/config
-		echo $gearman_worker_html; ?>
+			<?php
+			// show worker status/config
+			echo $gearman_worker_html; ?>
 		</form>
 		<div class="clear"></div>
 	</div>
 </body>
 </html>
 <?php
-	exit();
-}
 
 // control a server
 function control_server($worker_name, $cmd = "restart") {
