@@ -142,7 +142,7 @@ do
 	echo "  the configuration array inside of modgearmanxi.php!"
 
 	# lets just make sure our ssh is set up properly and print out a warning message if something went wrong
-	SSH_TEST=$(su $APACHE_USER -c "ssh -o PasswordAuthentication=no $GEARMAN_USER@$GEARMAN_WORKER 'echo success'")
+	SSH_TEST=$(su $APACHE_USER -c "ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no $GEARMAN_USER@$GEARMAN_WORKER 'echo success'")
 	if [ ! "$SSH_TEST" == "success" ]; then
 		echo ""
 		echo "*************************"

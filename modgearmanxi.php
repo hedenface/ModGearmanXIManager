@@ -46,7 +46,7 @@ check_authentication();
 $gearmanxi_cfg = array(
 
 	// the worker array
-	'worker' => array(
+	'workers' => array(
 		'host_name' => array(
 			'ip' =>		'ip_address',
 			'cfg' =>	'/path/to/this/workers/modgearman_worker.conf',
@@ -75,12 +75,12 @@ $gearmanxi_cfg = array(
 $apache_safe_dir = $gearmanxi_cfg["apache_safe_dir"];
 	
 // attempt to create gearman_apache_safe_dir
-if (!mkdir($apache_safe_dir, 0777, true))
+if (!@mkdir($apache_safe_dir, 0777, true))
 	$error_msg .= "Unable to create directory: $apache_safe_dir<br />";
 
 // attempt to delete all current configuration files (the backups on this server, not on each of the hosts)
 foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker)
-	if (!unlink("$apache_safe_dir/$worker_name.conf"))
+	if (!@unlink("$apache_safe_dir/$worker_name.conf"))
 		$error_msg .= "Unable to delete tempfile: $apache_safe_dir/$worker_name.conf<br />";
 
 // handle post data
@@ -347,9 +347,9 @@ function control_server($worker_name, $cmd = "restart") {
 
 	global $gearmanxi_cfg;
 
-	$worker_ip = $gearmanxi_cfg[$worker_name]["ip"];
-	$worker_cfg = $gearmanxi_cfg[$worker_name]["cfg"];
-	$worker_initd = $gearmanxi_cfg[$worker_name]["initd"];
+	$worker_ip = $gearmanxi_cfg["workers"][$worker_name]["ip"];
+	$worker_cfg = $gearmanxi_cfg["workers"][$worker_name]["cfg"];
+	$worker_initd = $gearmanxi_cfg["workers"][$worker_name]["initd"];
 
 	// only accept start/stop/restart
 	if (($cmd != "start") &&
