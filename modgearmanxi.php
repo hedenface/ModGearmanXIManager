@@ -23,6 +23,46 @@ This file is part of "ModGearman XI Manager".
     along with "ModGearman XI Manager".  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/////////////////////////////////////////////////////////////////////
+// gearmanxi config variables 									/////
+// NOTE: YOU NEED TO CHANGE THESE TO MATCH YOUR ENVIRONMENT 	/////
+/////////////////////////////////////////////////////////////////////
+$gearmanxi_cfg = array(
+
+	'workers' => array(
+
+		'host_name' => array(
+			'ip' =>		'ip_address',										// the ip address you configured in the setup.sh script
+			'user' =>	'username',											// the username you used to connect to that ip address
+			'cfg' =>	'/path/to/this/workers/modgearman_worker.conf',		// the configuration file you'd like to control with this component
+			'initd' =>	'/etc/init.d/mod_gearman_worker'					// the service control script of the worker on the server
+			),
+
+		'example1' => array(
+			'ip' =>		'192.168.1.21',
+			'user' => 	'nagios',
+			'cfg' =>	'/etc/mod_gearman/mod_gearman_worker.conf',
+			'initd' =>	'/etc/init.d/mod_gearman_worker'
+			),
+
+		'example2.fqdn.com' => array(
+			'ip' =>		'192.168.1.22',
+			'user' =>	'naemon',
+			'cfg' =>	'/etc/mod_gearman2/worker.conf',
+			'initd' =>	'/etc/init.d/mod-gearman2-worker'
+			),
+		),
+
+	// where can apache safely store the remote configuration files?
+	'apache_safe_dir' => '/tmp/nagiostemp/mod_gearman',
+
+	// which version of ModGearman is the server running?
+	'mod_gearman_version' => 2,
+	);
+/////////////////////////////////////////////////////////////////////
+// End of configuration variables 								/////
+/////////////////////////////////////////////////////////////////////
+
 // include the component helper
 require_once(dirname(__FILE__) . "/../componenthelper.inc.php");
 
@@ -40,36 +80,6 @@ check_prereqs();
 
 // check authentication
 check_authentication();
-
-// gearmanxi config variables
-// NOTE: YOU NEED TO CHANGE THESE TO MATCH YOUR ENVIRONMENT
-$gearmanxi_cfg = array(
-
-	// the worker array
-	'workers' => array(
-		'host_name' => array(
-			'ip' =>		'ip_address',
-			'cfg' =>	'/path/to/this/workers/modgearman_worker.conf',
-			'initd' =>	'/etc/init.d/mod_gearman_worker'
-			),
-		'example1' => array(
-			'ip' =>		'192.168.1.21',
-			'cfg' =>	'/etc/mod_gearman/mod_gearman_worker.conf',
-			'initd' =>	'/etc/init.d/mod_gearman_worker'
-			),
-		'example2.fqdn.com' => array(
-			'ip' =>		'192.168.1.22',
-			'cfg' =>	'/etc/mod_gearman2/worker.conf',
-			'initd' =>	'/etc/init.d/mod-gearman2-worker'
-			),
-		),
-
-	// where can apache safely store the remote configuration files?
-	'apache_safe_dir' => '/tmp/nagiostemp/mod_gearman',
-
-	// which version of ModGearman is the server running?
-	'mod_gearman_version' => 2,
-	);
 
 // readability's sake!
 $apache_safe_dir = $gearmanxi_cfg["apache_safe_dir"];
@@ -114,6 +124,7 @@ if ($update != "") {
 
 		// for readability
 		$worker_ip = $worker["ip"];
+		$worker_user = $worker["user"];
 		$worker_cfg = $worker["cfg"];
 		
 		// replace dots with underscores
@@ -133,11 +144,11 @@ if ($update != "") {
 				
 				// backup the worker's current configuration file
 				// note that we don't use ssh2_* commands here
-				$ssh_cmd = "ssh nagios@$worker_ip \"cp $worker_cfg $worker_cfg.backup_`date +%F_%H%m`\"";
+				$ssh_cmd = "ssh $worker_user@$worker_ip \"cp $worker_cfg $worker_cfg.backup_`date +%F_%H%m`\"";
 				exec($ssh_cmd);
 				
 				// copy the new file to the server
-				$ssh_cmd = "scp $apache_safe_dir/$worker_name.conf.new nagios@$worker_ip:$worker_cfg";
+				$ssh_cmd = "scp $apache_safe_dir/$worker_name.conf.new $worker_user@$worker_ip:$worker_cfg";
 				exec($ssh_cmd);
 				
 				// delete our .conf.new file!
@@ -184,18 +195,19 @@ foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker) {
 
 	// for readability
 	$worker_ip = $worker["ip"];
+	$worker_user = $worker["user"];
 	$worker_cfg = $worker["cfg"];
 	$worker_initd = $worker["initd"];
 
 	// the scp(ssh) command to pull this gearmans conf over
-	$ssh_cmd = "scp nagios@$worker_ip:$worker_cfg $apache_safe_dir/$worker_name.conf 2>&1";
+	$ssh_cmd = "scp $worker_user@$worker_ip:$worker_cfg $apache_safe_dir/$worker_name.conf 2>&1";
 		
 	// execute the ssh command and get each line that we checked for in its own array
 	$ssh_output[$worker_name] = array();
-	exec($ssh_cmd, $ssh_output[$worker_name]);
+	exec($ssh_cmd, $ssh_output_exec);
 			
 	// check if we have any error output from the ssh command
-	if (preg_match("/^ssh:/", $ssh_output[$worker_name])) {
+	if (preg_match("/^ssh:/", $ssh_output_exec)) {
 
 		// this is unexpected maintenance, can we handle the errors gracefully?
 		$ssh_output[$worker_name][] = "UNEXPECTED_ERROR";
@@ -207,7 +219,7 @@ foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker) {
 	// good output starts with: "check_gearman OK -"
 	// bad output starts with: "check_gearman WARNING -" - THIS IS THE ONE WE'RE WORRIED ABOUT RUH-ROH RAGGY
 	$check_array = array();
-	$check_cmd = "ssh nagios@$worker_ip \"$worker_initd status\"";
+	$check_cmd = "ssh $worker_user@$worker_ip \"$worker_initd status\"";
 	exec($check_cmd, $check_array);
 	foreach ($check_array as $check_array_line) {
 		if (strpos($check_array_line, "mod_gearman_worker is not running") !== false || strpos($check_array_line, "mod_gearman2_worker is not running") !== false) {
@@ -228,12 +240,12 @@ foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker) {
 HTML;
 
 	} elseif (in_array("DISCONNECTED", $ssh_output[$worker_name])) {
-		$conf_file_data = @file_get_contents("$gearman_apache_safe_dir/$worker_name.conf");
+		$conf_file_data = @file_get_contents("$apache_safe_dir/$worker_name.conf");
 		$gearman_worker_html .= <<<HTML
 			<div class="disconnected worker">
 				<div class="name">{$worker_name} NOT CONNECTED</div>
 				<div class="ip">{$worker_ip}</div>
-				<input type="submit" name="connect_$worker_ip" value="Connect this Worker" />
+				<input type="submit" name="connect_{$worker_name}" value="Connect this Worker" />
 				<textarea name="conf_$worker_name" id="conf_$worker_name" class="conftext">
 					{$conf_file_data}
 				</textarea>
@@ -243,13 +255,13 @@ HTML;
 HTML;
 
 	} else {
-		$conf_file_data = @file_get_contents("$gearman_apache_safe_dir/$worker_name.conf");
+		$conf_file_data = @file_get_contents("$apache_safe_dir/$worker_name.conf");
 		$gearman_worker_html .= <<<HTML
 			<div class="conf worker">
 				<input type="hidden" name="active_$worker_name" value="true" />
 				<div class="name">$worker_name</div>
 				<div class="ip">$worker_ip</div>
-				<input type="submit" name="disconnect_$worker_ip" value="Disconnect this Worker" />
+				<input type="submit" name="disconnect_{$worker_name}" value="Disconnect this Worker" />
 				<textarea name="conf_$worker_name" id="conf_$worker_name" class="conftext">
 					{$conf_file_data}
 				</textarea>
@@ -348,6 +360,7 @@ function control_server($worker_name, $cmd = "restart") {
 	global $gearmanxi_cfg;
 
 	$worker_ip = $gearmanxi_cfg["workers"][$worker_name]["ip"];
+	$worker_user = $gearmanxi_cfg["workers"][$worker_name]["user"];
 	$worker_cfg = $gearmanxi_cfg["workers"][$worker_name]["cfg"];
 	$worker_initd = $gearmanxi_cfg["workers"][$worker_name]["initd"];
 
@@ -357,7 +370,7 @@ function control_server($worker_name, $cmd = "restart") {
 		$cmd = "restart";
 
 	// the restart command to execute
-	$ssh_cmd = "ssh nagios@$worker_ip \"/etc/init.d/mod_gearman_worker $cmd\" 2>&1";
+	$ssh_cmd = "ssh $worker_user@$worker_ip \"/etc/init.d/mod_gearman_worker $cmd\" 2>&1";
 	$ssh_output = array();
 	exec($ssh_cmd, $ssh_output);
 	
