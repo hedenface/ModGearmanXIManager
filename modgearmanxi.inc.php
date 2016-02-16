@@ -1,8 +1,8 @@
 <?php
 /*
 ModGearman XI Manager
-Version 0.1
-2016-02-09
+Version 1.0
+2016-02-15
 ---------------------
 Bryan Heden
 b.heden@gmail.com
@@ -39,8 +39,8 @@ function modgearmanxi_component_init() {
 		COMPONENT_AUTHOR => 		"Bryan Heden <b.heden@gmail.com>",
 		COMPONENT_DESCRIPTION => 	"Manage ModGearman daemon and workers from a central location from within Nagios XI.",
 		COMPONENT_TITLE => 			"ModGearman XI Manager",
-		COMPONENT_VERSION => 		0.1,
-		COMPONENT_DATE => 			"02/09/2016");
+		COMPONENT_VERSION => 		1.0,
+		COMPONENT_DATE => 			"02/15/2016");
 
 	register_component($modgearmanxi_component_name, $args);
 
@@ -50,7 +50,6 @@ function modgearmanxi_component_init() {
 function modgearmanxi_component_addmenu($arg = null) {
 
 	global $modgearmanxi_component_name;
-
 	$urlbase = get_component_url_base($modgearmanxi_component_name);
 
 	$mi = find_menu_item(MENU_ADMIN, "menu-admin-managesystemconfig", "id");
@@ -62,7 +61,6 @@ function modgearmanxi_component_addmenu($arg = null) {
 		return;
 
 	$neworder = $order + 1;
-
 	add_menu_item(MENU_ADMIN, array(
 		"type" => 	"link",
 		"title" => 	"ModGearman XI Manager",

@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ModGearman XI Manager
-# Version 0.1
-# 2016-02-09
+# Version 1.0
+# 2016-02-15
 # ---------------------
 # Bryan Heden
 # b.heden@gmail.com
@@ -26,7 +26,7 @@
 echo ""
 echo "*************************"
 echo " ModGearman XI Manager"
-echo " Version 0.1"
+echo " Version 1.0"
 echo "*************************"
 echo " Bryan Heden"
 echo " b.heden@gmail.com"

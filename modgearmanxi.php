@@ -1,8 +1,8 @@
 <?php
 /*
 ModGearman XI Manager
-Version 0.1
-2016-02-09
+Version 1.0
+2016-02-15
 ---------------------
 Bryan Heden
 b.heden@gmail.com
@@ -23,363 +23,428 @@ This file is part of "ModGearman XI Manager".
     along with "ModGearman XI Manager".  If not, see <http://www.gnu.org/licenses/>.
 */
 
-/////////////////////////////////////////////////////////////////////
-// gearmanxi config variables 									/////
-// NOTE: YOU NEED TO CHANGE THESE TO MATCH YOUR ENVIRONMENT 	/////
-/////////////////////////////////////////////////////////////////////
-$gearmanxi_cfg = array(
-
-	'workers' => array(
-
-		'host_name' => array(
-			'ip' =>		'ip_address',										// the ip address you configured in the setup.sh script
-			'user' =>	'username',											// the username you used to connect to that ip address
-			'cfg' =>	'/path/to/this/workers/modgearman_worker.conf',		// the configuration file you'd like to control with this component
-			'initd' =>	'/etc/init.d/mod_gearman_worker'					// the service control script of the worker on the server
-			),
-
-		'example1' => array(
-			'ip' =>		'192.168.1.21',
-			'user' => 	'nagios',
-			'cfg' =>	'/etc/mod_gearman/mod_gearman_worker.conf',
-			'initd' =>	'/etc/init.d/mod_gearman_worker'
-			),
-
-		'example2.fqdn.com' => array(
-			'ip' =>		'192.168.1.22',
-			'user' =>	'naemon',
-			'cfg' =>	'/etc/mod_gearman2/worker.conf',
-			'initd' =>	'/etc/init.d/mod-gearman2-worker'
-			),
-		),
-
-	// where can apache safely store the remote configuration files?
-	'apache_safe_dir' => '/tmp/nagiostemp/mod_gearman',
-
-	// which version of ModGearman is the server running?
-	'mod_gearman_version' => 2,
-	);
-/////////////////////////////////////////////////////////////////////
-// End of configuration variables 								/////
-/////////////////////////////////////////////////////////////////////
-
-// include the component helper
+// do the needful nagiosxi stuff
 require_once(dirname(__FILE__) . "/../componenthelper.inc.php");
 
-// initialization stuff
 pre_init();
-
-// start session
 init_session();
-
-// grab GET or POST variables 
 grab_request_vars();
-
-// check prereqs
 check_prereqs();
-
-// check authentication
 check_authentication();
 
-// readability's sake!
-$apache_safe_dir = $gearmanxi_cfg["apache_safe_dir"];
-	
-// attempt to create gearman_apache_safe_dir
-if (!@mkdir($apache_safe_dir, 0777, true))
-	$error_msg .= "Unable to create directory: $apache_safe_dir<br />";
+// lets grab our configuration array
+require_once(dirname(__FILE__) . "/modgearmanxi.config.inc.php");
 
-// attempt to delete all current configuration files (the backups on this server, not on each of the hosts)
-foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker)
-	if (!@unlink("$apache_safe_dir/$worker_name.conf"))
-		$error_msg .= "Unable to delete tempfile: $apache_safe_dir/$worker_name.conf<br />";
+$errors = array();
 
-// handle post data
-$update = grab_request_var("update", "");
-$restart = grab_request_var("restart", "");
-$restart_active = grab_request_var("restart_active", "");
-$disconnect_worker = false;
-$connect_worker = false;
 
-// cycle through the workers and check for any connects/disconnects
-foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker) {
-	
-	// we have to replace the dots with underscores because of post (this comes up later, too)
-	$safe_worker_name = str_replace(".", "_", $worker_name);
+route_request();
+function route_request() {
 
-	$disconnect = grab_request_var("disconnect_$safe_worker_name", "");
-	$connect = grab_request_var("connect_$safe_worker_name", "");
+	$cmd = grab_request_var("cmd", "");
 
-	if ($disconnect != "")
-		control_server($worker_name, "stop");
+	switch($cmd) {
 
-	if ($connect != "")
-		control_server($worker_name, "sart");
+		case "Update Configuration":
+			update_worker_cfg();
+			break;
+
+		case "Start Worker":
+			control_worker("start");
+			break;
+
+		case "Restart Worker":
+			control_worker("restart");
+			break;
+
+		case "Attempt to Start Worker":
+			control_worker("start");
+			break;
+
+		case "Stop Worker":
+			control_worker("stop");
+			break;
+		
+		case "top":
+			show_gearman_top();
+			break;
+
+		default:
+			break;
+	}
+
+	// always show page
+	show_page();
 }
 
-// update worker configuration files
-if ($update != "") {
-	
-	// cycle through each worker to check for configuration
-	foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker) {
 
-		// for readability
-		$worker_ip = $worker["ip"];
-		$worker_user = $worker["user"];
-		$worker_cfg = $worker["cfg"];
-		
-		// replace dots with underscores
-		$safe_worker_name = str_replace(".", "_", $worker_name);
-		$conf_file = grab_request_var("conf_$safe_worker_name", "");
+// print gearman top output and exit
+function show_gearman_top() {
+
+	$version = 1;
+	if (!empty($_REQUEST['ver']))
+	    $version = $_REQUEST['ver'];
+    $cmd = "gearman_top" . ($version == 2 ? "2" : "") . " -b";
+
+	echo "<pre>";
+	system($cmd);
+	echo "</pre>";
+	exit();
+}
 
 
-		if ($conf_file != "") {
-			
-			// replace the \r (dos format) with blank (nix)
-			$conf_file = str_replace("\r", "", $conf_file);
-			
-			// write the conf file, and check for errors in the meantime
-			// but we don't check for errors IF the file is written successfully, because since we've got this far, we can (not safely)
-			// assume that the configuration file textarea was present to begin with, which means that the original ssh command was executed.
-			if (@file_put_contents("$apache_safe_dir/$worker_name.conf.new", $conf_file) !== false) {
-				
-				// backup the worker's current configuration file
-				// note that we don't use ssh2_* commands here
-				$ssh_cmd = "ssh $worker_user@$worker_ip \"cp $worker_cfg $worker_cfg.backup_`date +%F_%H%m`\"";
-				exec($ssh_cmd);
-				
-				// copy the new file to the server
-				$ssh_cmd = "scp $apache_safe_dir/$worker_name.conf.new $worker_user@$worker_ip:$worker_cfg";
-				exec($ssh_cmd);
-				
-				// delete our .conf.new file!
-				if (!unlink("$gearman_apache_safe_dir/$worker_name.conf.new"))
-					$error_msg .= "Unable to delete tempfile: $apache_safe_dir/$worker_name.conf.new<br />";
-					
-			} else
-				$error_msg .= "Unable to create tempfile: $apache_safe_dir/$worker_name.conf.new<br />";
+// build the main page and tabs
+function show_page() {
+
+	global $gearmanxi_cfg;
+	global $errors;
+	$make_worker_html = true;
+
+	// make the apache_safe_dir if we need to
+	if (!file_exists($gearmanxi_cfg["apache_safe_dir"]))
+		if (!mkdir($gearmanxi_cfg["apache_safe_dir"], 0777, true))
+			$errors[] .= "Unable to create apache safe directory: " . $gearmanxi_cfg["apache_safe_dir"];
+
+	// rudimentary check to see if user has set up the config array
+	if (!empty($gearmanxi_cfg["worker"]["example1"]) && !empty($gearmanxi_cfg["worker"]["example2.fqdn.com"])) {
+		$errors[] = "It looks like you haven't set up the configuration array in " . dirname(__FILE__) . "/modgearmanxi.config.inc.php";
+		$make_worker_html = false;
+	}
+
+    do_page_start(array("page_title" => "ModGearman XI Manager"), true);
+	echo "<h1>ModGearman XI Manager</h1>";
+	show_errors($errors);
+
+	// build the correlating list of tabs and div content for that div - all while building a portion of the overview status table
+	$worker_tabs = "";
+	$worker_divs = "";
+	$overview_status_table = "<table class='infotable table table-condensed table-bordered' style='width: 60%;'>";
+	if ($make_worker_html) {
+		foreach($gearmanxi_cfg["worker"] as $worker_name => $worker) {
+
+			$worker_id = base64_encode($worker_name);
+
+			// build the tabs section
+			$worker_tabs .= "<li><a href='#$worker_name' title='$worker_name'><span>$worker_name</span></a></li>\n";
+
+			// get the info we need to build the rest of the html
+			$worker_can_connect = test_ssh_connectivity($worker["user"], $worker["ip"]);
+			$worker_gearman_cfg_readable = test_cfg_writable($worker["user"], $worker["ip"], $worker["cfg"]);
+			$worker_gearman_cfg_writable = test_cfg_writable($worker["user"], $worker["ip"], $worker["cfg"]);
+			$worker_gearman_dir_writable = test_dir_writable($worker["user"], $worker["ip"], dirname($worker["cfg"]));
+
+			// copy the remote file so we can edit it if we need to
+			$worker_local_conf = local_copy_cfg($worker["user"], $worker["ip"], $worker["cfg"]);
+			$worker_copy_conf_successful = scp_remote_file($worker["user"], $worker["ip"], $worker["cfg"], $worker_local_conf);
+
+			// service control stuff
+			$worker_gearman_running = service_status($worker["user"], $worker["ip"], $worker["initd"], $worker_gearman_running_text);
+			$action_value = "Restart Worker";
+			$stop_button = "<input type='submit' name='cmd' value='Stop Worker' style='margin-left: 5px;' />";
+			if ($worker_gearman_running == false) {
+				$stop_button = "";
+				if (strpos($worker_gearman_running_text, "is not running") !== false)
+					$action_value = "Start Worker";
+				else
+					$action_value = "Attempt to Start Worker";
+			}
+
+			// build this workers div
+			$worker_divs .= 
+				"<div id='$worker_name' style='width: 60%;'>" .
+					"<form method='post'>" .
+						"<input type='hidden' name='worker_id' value='$worker_id' />" .
+						"<table class='infotable table table-condensed table-striped table-bordered'>" .
+							"<tr><td>Username:</td><td>" . $worker["user"] . "</td></tr>" .
+							"<tr><td>IP Address:</td><td>" . $worker["ip"] . "</td></tr>" .
+							"<tr><td>Configuration File:</td><td>" . $worker["cfg"] . "</td></tr>" .
+							"<tr><td>Service Control:</td><td>" . $worker["initd"] . "</td></tr>" .
+						"</table>" .
+						worker_status_table("infotable table table-condensed table-striped table-bordered", $worker_can_connect, $worker_gearman_cfg_readable, $worker_gearman_cfg_writable, $worker_gearman_dir_writable, $worker_gearman_running, $worker_gearman_running_text) .
+						"<input type='submit' name='cmd' value='$action_value' />" .
+						$stop_button .
+						"<input type='submit' name='cmd' value='Update Configuration' style='float: right;' />" .
+						"<textarea name='conf' rows='24' style='width: 100%; margin-top: 5px;'>" .
+							file_get_contents($worker_local_conf) .
+						"</textarea>" .
+					"</form>" .
+				"</div>";
+
+			// build the status table for overview
+			$overview_status_table .= 
+				"<tr>" .
+					"<td><strong>$worker_name</strong>&nbsp;" . $worker["user"] . "@" . $worker["ip"] . ":" . $worker["cfg"] . " (" . $worker["initd"] . ")</td>" .
+				"</tr><tr>" .
+					"<td align='right'>" .
+						worker_status_table("infotable table table-condensed table-striped table-bordered", $worker_can_connect, $worker_gearman_cfg_readable, $worker_gearman_cfg_writable, $worker_gearman_dir_writable, $worker_gearman_running, $worker_gearman_running_text) .
+						"<form method='post'>" .
+							"<input type='hidden' name='worker_id' value='$worker_id' />" .
+							"<div style='float: right; display: inline-block; margin-top: 5px;'>" .
+								"<input type='submit' name='cmd' value='$action_value' />" .
+								$stop_button .
+							"</div>" .
+						"</form>" .
+					"</td>" .
+				"</tr>";
+
 		}
 	}
-	
-	// we want to restart all of the workers we just made a change to
-	$restart_active = "Restart ACTIVE Workers";
-}
-
-// restart ALL client workers
-// THIS IS POTENTIALLY STUPID AND DANGEROUS BUT WHATEVER
-if ($restart != "") {
-
-	// cycle through each worker to restart!
-	foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker)
-		control_server($worker_name, "restart");
-}
-
-// restart only active client workers
-if ($restart_active != "") {
-	
-	// cycle through each worker to restart!
-	foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker) {
-	
-		// replace dots with underscores, and check if we have an active_$worker_name
-		// only proceed if we do!
-		$safe_worker_name = str_replace(".", "_", $worker_name);
-		$active = grab_request_var("active_$safe_worker_name", "");
-		if ($active != "")
-			control_server($worker_name, "restart");
-	}
-}
-
-// get worker information
-$gearman_worker_html = "";
-$ssh_output = array();
-foreach ($gearmanxi_cfg["workers"] as $worker_name => $worker) {
-
-	// for readability
-	$worker_ip = $worker["ip"];
-	$worker_user = $worker["user"];
-	$worker_cfg = $worker["cfg"];
-	$worker_initd = $worker["initd"];
-
-	// the scp(ssh) command to pull this gearmans conf over
-	$ssh_cmd = "scp $worker_user@$worker_ip:$worker_cfg $apache_safe_dir/$worker_name.conf 2>&1";
-		
-	// execute the ssh command and get each line that we checked for in its own array
-	$ssh_output[$worker_name] = array();
-	exec($ssh_cmd, $ssh_output_exec);
-			
-	// check if we have any error output from the ssh command
-	if (preg_match("/^ssh:/", $ssh_output_exec)) {
-
-		// this is unexpected maintenance, can we handle the errors gracefully?
-		$ssh_output[$worker_name][] = "UNEXPECTED_ERROR";
-	}
-	
-	// execute a check_gearman command to check and see if this worker is disconnected!
-	// this only works if the $worker_name variable is the fqdn name that gearmand expects
-	// AND it only works if our gearman server is running on localhost
-	// good output starts with: "check_gearman OK -"
-	// bad output starts with: "check_gearman WARNING -" - THIS IS THE ONE WE'RE WORRIED ABOUT RUH-ROH RAGGY
-	$check_array = array();
-	$check_cmd = "ssh $worker_user@$worker_ip \"$worker_initd status\"";
-	exec($check_cmd, $check_array);
-	foreach ($check_array as $check_array_line) {
-		if (strpos($check_array_line, "mod_gearman_worker is not running") !== false || strpos($check_array_line, "mod_gearman2_worker is not running") !== false) {
-			$ssh_output[$worker_name][] = "DISCONNECTED";
-		}
-	}
-            
-	// build our gearman_worker_html that contains the information for each worker
-	if (in_array("UNEXPECTED_ERROR", $ssh_output[$worker_name])) {
-		$gearman_worker_html .= <<<HTML
-			<div class="error worker">
-				<div class="name">{$worker_name}</div>
-				<div class="ip">{$worker_ip}</div>
-				<div class="message">Unable to open SSH connection</div>
-				<div class="clear"></div>
-			</div>
-			<div class="clear"></div>
-HTML;
-
-	} elseif (in_array("DISCONNECTED", $ssh_output[$worker_name])) {
-		$conf_file_data = @file_get_contents("$apache_safe_dir/$worker_name.conf");
-		$gearman_worker_html .= <<<HTML
-			<div class="disconnected worker">
-				<div class="name">{$worker_name} NOT CONNECTED</div>
-				<div class="ip">{$worker_ip}</div>
-				<input type="submit" name="connect_{$worker_name}" value="Connect this Worker" />
-				<textarea name="conf_$worker_name" id="conf_$worker_name" class="conftext">
-					{$conf_file_data}
-				</textarea>
-				<div class="clear"></div>
-			</div>
-			<div class="clear"></div>
-HTML;
-
-	} else {
-		$conf_file_data = @file_get_contents("$apache_safe_dir/$worker_name.conf");
-		$gearman_worker_html .= <<<HTML
-			<div class="conf worker">
-				<input type="hidden" name="active_$worker_name" value="true" />
-				<div class="name">$worker_name</div>
-				<div class="ip">$worker_ip</div>
-				<input type="submit" name="disconnect_{$worker_name}" value="Disconnect this Worker" />
-				<textarea name="conf_$worker_name" id="conf_$worker_name" class="conftext">
-					{$conf_file_data}
-				</textarea>
-				<div class="clear"></div>
-			</div>
-			<div class="clear"></div>
-HTML;
-	}
-}
-	
-
-?>
-<!DOCTYPE html>
-<html>
-<head>
-	<title>ModGearman XI Manager</title>
-	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-<?php do_page_head_links(); ?>
-	<style type="text/css">
-#gearman_top {
-	margin: 10px 20px 25px;
-	border: 1px solid black;
-	display: inline-block;
-	padding: 10px;
-}
-.worker {
-	margin: 10px 20px 25px;
-	clear: both;
-	border: 1px solid black;
-	background-color: #00ff00;
-	display: inline-block;
-	padding: 10px;
-}
-textarea.conftext {
-	width: 50em;
-	height: 20em;
-}
-.worker .name {
-	font-size: 1.5em;
-	font-weight: bold;
-	text-decoration: underline;
-}
-.worker .ip {
-	font-size: 1.25em;
-	font-style: italic;
-}
-.error {
-	background-color: #fe2e2e;
-}
-.disconnected {
-	background-color: #ff8000;
-}
-.worker textarea {
-	float: left;
-	clear: both;
-}
-.worker input {
-	float: left;
-	clear: both;
-}
-.clear {
-	clear: both;
-}
-	</style>
-	<script type="text/javascript">
+	$overview_status_table .= "</table>";
+	?>
+	<script>
+		$(function () {
+			$("#tabs").tabs().show();
+		});
 		window.setInterval(function() {
-			$.ajax("modgearmanxi.ajax.php?ver=<?php echo $gearmanxi_cfg["mod_gearman_version"]; ?>").done(function(html) {
+			$.ajax("modgearmanxi.php?cmd=top&ver=<?php echo $gearmanxi_cfg["mod_gearman_version"]; ?>").done(function(html) {
 				$("#gearman_top").empty().append(html);
 			});
 		}, 1000);
 	</script>
-</head>
-<body>
-	<h2>gearman_top Output</h2>
-	<div id="gearman_top"></div>
-	<h2>ModGearman Workers</h2>
-	<div id="workers">
-		<form method="post">
-			<input type="submit" name="update" value="Update Worker Configuration" />
-			<input type="submit" name="restart" value="Restart ALL Workers" />
-			<input type="submit" name="restart_active" value="Restart ACTIVE Workers" />
-			<div class="clear"></div>
-			<?php
-			// show worker status/config
-			echo $gearman_worker_html; ?>
-		</form>
-		<div class="clear"></div>
+	<p>Manage all of your remote ModGearman Workers from a central location!</p>
+	<p>In order to make full use of this component, you'll need to make sure that this servers apache user can connect remotely - without password authentication -
+		to each of the worker servers you want to manage. The user that you connect as to each of those servers needs to have read/write access to the configuration files listed in modgearmanxi.config.inc.php.</p>
+	<p>There is a script that you can run (it isn't necessary as long as you've met the previous listed requirements) to make all that easier. Its located at 
+		<strong style="font-family: courier;"><?php echo dirname(__FILE__) . "/setup.sh" ?></strong>.</p>
+	<div id="tabs" class="hide">
+		<ul class="tabnavigation">
+			<li><a href="#overview" title="Overview"><span>Overview</span></a></li>
+			<?php echo $worker_tabs; ?>
+		</ul>
+		<div id="overview" class="ui-tabs-hide">
+			<h5 class="ul">gearman_top<?php echo ($gearmanxi_cfg['mod_gearman_version'] == "2" ? "2" : ""); ?> Output</h5>
+			<div id="gearman_top" style="display: inline-block;"></div>
+			<h5 class="ul">ModGearman Workers</h5>
+			<?php echo $overview_status_table; ?>
+		</div>
+		<?php echo $worker_divs; ?>
 	</div>
-</body>
-</html>
-<?php
+	<?php
 
-// control a server
-function control_server($worker_name, $cmd = "restart") {
+}
+
+
+// quick and drity status table, so we don't have to repeat this code multiple times when we build the page
+function worker_status_table($table_class, $worker_can_connect, $worker_gearman_cfg_readable, $worker_gearman_cfg_writable, $worker_gearman_dir_writable, $worker_gearman_running, $worker_gearman_running_text) {
+	return
+		"<table class='$table_class'>" .
+			"<tr>" .
+				"<td style='width: 32px;' align='center'>" . nagiosxi_img($worker_can_connect) . "</td>" .
+				"<td>SSH Connectivity</td>" .
+			"</tr>" .
+			"<tr>" .
+				"<td align='center'>" . nagiosxi_img($worker_gearman_cfg_readable) . "</td>" .
+				"<td>Configuration File Readable</td>" .
+			"</tr>" .
+			"<tr>" .
+				"<td align='center'>" . nagiosxi_img($worker_gearman_cfg_writable) . "</td>" .
+				"<td>Configuration File Writable</td>" .
+			"</tr>" .
+			"<tr>" .
+				"<td align='center'>" . nagiosxi_img($worker_gearman_dir_writable) . "</td>" .
+				"<td>Configuration Directory Writable</td>" .
+			"</tr>" .
+			"<tr>" .
+				"<td align='center'>" . nagiosxi_img($worker_gearman_running) . "</td>" .
+				"<td>$worker_gearman_running_text</td>" .
+			"</tr>" .
+		"</table>";
+}
+
+
+// basic function for error display on the main page
+function show_errors($errors = array()) {
+	if (count($errors) > 0) { ?>
+	    <div id="message">
+	        <ul class="errorMessage" style="padding: 10px 0 10px 30px;">
+	            <?php foreach ($errors as $k => $msg) { ?>
+	                <li><?php echo $msg; ?></li>
+	            <?php } ?>
+	        </ul>
+	    </div>
+	<?php }	
+}
+
+
+// test ssh connectivity to a server (from apache obviously)
+function test_ssh_connectivity($user, $host) {
+	exec_ssh_command($user, $host, "echo ''", $output, $return_var);
+	if ($return_var == 0)
+		return true;
+	return false;
+}
+
+
+// test if a given file is writable via ssh
+function test_cfg_readable($user, $host, $file) {
+	exec_ssh_command($user, $host, "cat $file", $output, $return_var);
+	if ($return_var == 0)
+		return true;
+	return false;
+}
+
+
+// test if a given file is writable via ssh
+function test_cfg_writable($user, $host, $file) {
+	exec_ssh_command($user, $host, "touch $file", $output, $return_var);
+	if ($return_var == 0)
+		return true;
+	return false;
+}
+
+
+// check if a given dir is writable via ssh
+function test_dir_writable($user, $host, $dir) {
+	exec_ssh_command($user, $host, "touch $dir/test", $output, $return_var);
+	if ($return_var == 0) {
+		exec_ssh_command($user, $host, "rm -f $dir/test");
+		return true;
+	}
+	return false;
+}
+
+
+// the options we're going to use for all of our ssh calls
+function ssh_options() {
+	$ssh_options =
+		"-o PasswordAuthentication=no " .
+		"-o StrictHostKeyChecking=no " .
+		"-o GSSAPIAuthentication=no ";
+	return $ssh_options;
+}
+
+
+// basic ssh command functionality used throughout
+function exec_ssh_command($user, $host, $cmd, &$output, &$return_var) {
+	$ssh_options = ssh_options();
+	exec("ssh $ssh_options $user@$host \"$cmd\"", $output, $return_var);
+}
+
+
+// get current status of service control script
+function service_status($user, $host, $script, &$return_output) {
+	exec_ssh_command($user, $host, "$script status", $output, $return_var);
+	$output = $output[0];
+	if ($return_var == 0) {
+		$return_output = $output;
+		if (strpos($output, "is running") !== false)
+			return true;
+	} else {
+		if (strpos($output, "is not running") !== false)
+			$return_output = $output;
+		else
+			$return_output = "Unknown error running service control script";
+	}
+	return false;
+}
+
+
+// copy the specified file over from remote to local
+function scp_remote_file($user, $host, $remote_file, $local_file) {
+	$ssh_options = ssh_options();
+	exec("scp $ssh_options $user@$host:/$remote_file $local_file", $output, $return_var);
+	if ($return_var == 0)
+		return true;
+	return false;
+}
+
+
+// copy the specified file over from local to remote
+function scp_local_file($local_file, $user, $host, $remote_file) {
+	$ssh_options = ssh_options();
+	exec("scp $ssh_options $local_file $user@$host:/$remote_file", $output, $return_var);
+	if ($return_var == 0)
+		return true;
+	return false;
+}
+
+
+// get a common theme for building local configuration files
+function local_copy_cfg($user, $host, $file) {
+	global $gearmanxi_cfg;
+	$safe_dir = $gearmanxi_cfg['apache_safe_dir'];
+	$hash = md5($user . $host . $file);
+	$file = rtrim($safe_dir, "/") . "/" . $hash;
+	return $file;
+}
+
+
+// if val is false, show red !, if true show green check
+function nagiosxi_img($val) {
+	$image_dir = get_base_url() . "/images/";
+	if ($val) {
+		$src = $image_dir . "ok_small.png";
+		$title = $alt = "Ok";
+	}
+	else {
+		$src = $image_dir . "critical_small.png";
+		$title = $alt = "Critical";
+	}
+	return "<img src='$src' alt='$alt' title='$title' />";
+}
+
+
+// control a worker with their specified initd
+// action = restart, start, ""
+function control_worker($action) {
 
 	global $gearmanxi_cfg;
-
-	$worker_ip = $gearmanxi_cfg["workers"][$worker_name]["ip"];
-	$worker_user = $gearmanxi_cfg["workers"][$worker_name]["user"];
-	$worker_cfg = $gearmanxi_cfg["workers"][$worker_name]["cfg"];
-	$worker_initd = $gearmanxi_cfg["workers"][$worker_name]["initd"];
-
-	// only accept start/stop/restart
-	if (($cmd != "start") &&
-		($cmd != "stop"))
-		$cmd = "restart";
-
-	// the restart command to execute
-	$ssh_cmd = "ssh $worker_user@$worker_ip \"/etc/init.d/mod_gearman_worker $cmd\" 2>&1";
-	$ssh_output = array();
-	exec($ssh_cmd, $ssh_output);
-	
-	// check for /NO:ssh errors/ and for gearman errors 
-	foreach ($ssh_output as $output) {
-		if (strpos($output, "[ERROR]") !== false) {
-			echo "$worker_name [ $worker_ip ]: " . substr($output, strpos($output, "[ERROR]")) . "\n" .
-				strtoupper($cmd) . " FAILED - (Correct your error and try again?)\n\n";
-		}
+	global $errors;
+	$worker_id = base64_decode(grab_request_var("worker_id", ""));
+	if ($worker_id === false) {
+		$errors[] = "Attempted to control worker with no worker specified";
+		return false;
 	}
+
+	// make sure user input sane
+	if ($action !== "start" && $action !== "restart" && $action !== "stop") {
+		$errors[] = "Available options for service control: start/restart/stop";
+		return false;
+	}
+
+	$worker = $gearmanxi_cfg["worker"][$worker_id];
+	exec_ssh_command($worker["user"], $worker["ip"], $worker["initd"] . " $action", $output, $return_var);
+	if ($return_var == 0)
+		return true;
+
+	return false;
 }
+
+
+// upload configuration
+function update_worker_cfg() {
+
+	global $gearmanxi_cfg;
+	global $errors;
+	$worker_id = base64_decode(grab_request_var("worker_id", ""));
+	$cfg_data = grab_request_var("conf", "");
+
+	if ($worker_id === false) {
+		$errors[] = "Attempted to upload configuration file to unidentified worker";
+		return false;
+	}
+
+	$worker = $gearmanxi_cfg["worker"][$worker_id];
+	$local_file = local_copy_cfg($worker["user"], $worker["ip"], $worker["cfg"]);
+	$timestamp = date('Y-m-d-H-i-s');
+	$tmp_file = $local_file . $timestamp . ".tmp";
+
+	// copy the post data to our tmp file
+	file_put_contents($tmp_file, $cfg_data);
+
+	// backup users existing configuration file, as long as the directory is writable
+	if (test_dir_writable($worker["user"], $worker["ip"], dirname($worker["cfg"]))) {
+		exec_ssh_command($worker["user"], $worker["ip"], "cp " . $worker["cfg"] . " " . $worker["cfg"] . ".$timestamp.bak", $output, $return_var);
+		if ($return_var !== 0) {
+			$errors[] = "Something went wrong! Unable to create backup of worker configuration";
+		}
+	} else {
+		$errors[] = "Configuration directory not writable by " . $worker["user"] . "@" . $worker["ip"] . "! Backup may exist at $local_file";
+	}
+
+	// scp this file over to our server
+	if (!scp_local_file($tmp_file, $worker["user"], $worker["ip"], $worker["cfg"]))
+		$errors[] = "Something went wrong! Unable to copy $tmp_file to " . $worker["user"] . "@" . $worker["ip"] . ":" . $worker["cfg"];
+}
+
 ?>
