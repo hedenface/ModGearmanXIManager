@@ -15,6 +15,9 @@ ModGearman XI Manager is a fork of an earlier work, ModGearman Manager (https://
 
 ## Changelog
 
+### version 1.0
+* Rewrote entire codebase to reflect saner development conditions
+
 ### version 0.1
 * Cleaned up code and information to reflect new version
 * Accounted for different versions of ModGearman running
