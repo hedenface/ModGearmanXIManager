@@ -1,11 +1,20 @@
 <?php
 /*
 ModGearman XI Manager
+---------------------
 Version 1.0
 2016-02-15
----------------------
+Initial release
 Bryan Heden
 b.heden@gmail.com
+---------------------
+Version 1.0.1
+2016-12-12
+Steven Beauchemin
+SBeauchemin@gmail.com
+Minor modifications for systemctl awareness
+apologies for any unnecessary code reformatting :(
+---------------------
 
 This file is part of "ModGearman XI Manager".
 
@@ -32,44 +41,46 @@ modgearmanxi_component_init();
 
 function modgearmanxi_component_init() {
 
-	global $modgearmanxi_component_name;
+  global $modgearmanxi_component_name;
 
-	$args = array(
-		COMPONENT_NAME => 			$modgearmanxi_component_name,
-		COMPONENT_AUTHOR => 		"Bryan Heden <b.heden@gmail.com>",
-		COMPONENT_DESCRIPTION => 	"Manage ModGearman daemon and workers from a central location from within Nagios XI.",
-		COMPONENT_TITLE => 			"ModGearman XI Manager",
-		COMPONENT_VERSION => 		1.0,
-		COMPONENT_DATE => 			"02/15/2016");
+  $args = array(
+    COMPONENT_NAME =>        $modgearmanxi_component_name,
+    COMPONENT_AUTHOR =>      "Bryan Heden <b.heden@gmail.com>",
+    COMPONENT_DESCRIPTION => "Manage ModGearman daemon and workers from a central location from within Nagios XI.",
+    COMPONENT_TITLE =>       "ModGearman XI Manager",
+    COMPONENT_VERSION =>     "1.0.1",
+    COMPONENT_DATE =>        "12/12/2016"
+  );
 
-	register_component($modgearmanxi_component_name, $args);
+  register_component($modgearmanxi_component_name, $args);
 
-	register_callback(CALLBACK_MENUS_INITIALIZED, "modgearmanxi_component_addmenu");
+  register_callback(CALLBACK_MENUS_INITIALIZED, "modgearmanxi_component_addmenu");
 }
 
 function modgearmanxi_component_addmenu($arg = null) {
 
-	global $modgearmanxi_component_name;
-	$urlbase = get_component_url_base($modgearmanxi_component_name);
+  global $modgearmanxi_component_name;
+  $urlbase = get_component_url_base($modgearmanxi_component_name);
 
-	$mi = find_menu_item(MENU_ADMIN, "menu-admin-managesystemconfig", "id");
-	if ($mi == null)
-		return;
+  $mi = find_menu_item(MENU_ADMIN, "menu-admin-managesystemconfig", "id");
+  if ($mi == null)
+    return;
 
-	$order = grab_array_var($mi, "order","");
-	if ($order == "")
-		return;
+  $order = grab_array_var($mi, "order","");
+  if ($order == "")
+    return;
 
-	$neworder = $order + 1;
-	add_menu_item(MENU_ADMIN, array(
-		"type" => 	"link",
-		"title" => 	"ModGearman XI Manager",
-		"id" => 	"menu-admin-modgearmanxi",
-		"order" => 	$neworder,
-		"opts" => 	array(
-			"href" =>	$urlbase . "/modgearmanxi.php",
-			)
-		));
+  $neworder = $order + 1;
+  add_menu_item(MENU_ADMIN, array(
+      "type" =>  "link",
+      "title" => "ModGearman XI Manager",
+      "id" =>    "menu-admin-modgearmanxi",
+      "order" => $neworder,
+      "opts" =>  array(
+        "href" => $urlbase . "/modgearmanxi.php",
+      )
+    )
+  );
 }
 
 ?>
