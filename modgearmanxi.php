@@ -321,7 +321,7 @@ function test_cfg_writable($user, $host, $file) {
 function test_dir_writable($user, $host, $dir) {
   exec_ssh_command($user, $host, "touch $dir/test", $output, $return_var);
   if ($return_var == 0) {
-    exec_ssh_command($user, $host, "rm -f $dir/test");
+    exec_ssh_command($user, $host, "rm -f $dir/test", $output, $return_var);
     return true;
   }
   return false;
