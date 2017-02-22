@@ -14,6 +14,13 @@ Steven Beauchemin
 SBeauchemin@gmail.com
 Minor modifications for systemctl awareness
 apologies for any unnecessary code reformatting :(
+
+Version 1.0.2
+2017-02-22
+Steven Beauchemin
+SBeauchemin@gmail.com
+Fixed PHP Warning that were showing up in http log files during remote worker restart.
+Change made in function test_dir_writable - line 331
 ---------------------
 
 This file is part of "ModGearman XI Manager".
