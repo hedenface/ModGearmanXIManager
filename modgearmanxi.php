@@ -14,6 +14,13 @@ Steven Beauchemin
 SBeauchemin@gmail.com
 Minor modifications for systemctl awareness
 apologies for any unnecessary code reformatting :(
+
+Version 1.0.2
+2017-02-22
+Steven Beauchemin
+SBeauchemin@gmail.com
+Fixed PHP Warning that were showing up in http log files during remote worker restart.
+Change made in function test_dir_writable - line 331
 ---------------------
 
 This file is part of "ModGearman XI Manager".
@@ -321,7 +328,7 @@ function test_cfg_writable($user, $host, $file) {
 function test_dir_writable($user, $host, $dir) {
   exec_ssh_command($user, $host, "touch $dir/test", $output, $return_var);
   if ($return_var == 0) {
-    exec_ssh_command($user, $host, "rm -f $dir/test");
+    exec_ssh_command($user, $host, "rm -f $dir/test", $output, $return_var);
     return true;
   }
   return false;
